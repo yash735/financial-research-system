@@ -48,19 +48,30 @@ python document_ai/extract.py
 python scripts/check_prompt_sync.py
 ```
 
-## Always use `python -m`
+## If `adk` or `uvicorn` suddenly stops working
 
-Never call the venv's console scripts (`adk`, `uvicorn`, `pip`) directly. They
-hardcode an absolute interpreter path in their shebang, so they break the moment
-the virtualenv is moved — and a shebang cannot express a path containing a space
-at all, so they will never work from a directory like `My Projects/`.
+Console scripts (`adk`, `uvicorn`, `pip`) work fine — until they don't. They
+bake an absolute interpreter path into their launcher at install time, so they
+stop working the moment the virtualenv — or a directory above it — is moved or
+renamed:
 
-```bash
-./adk_env/bin/uvicorn ...            # bad interpreter: no such file or directory
-./adk_env/bin/python -m uvicorn ...  # always works
+```
+./adk_env/bin/uvicorn: bad interpreter: /old/path/adk_env/bin/python: no such file or directory
 ```
 
-`run.sh` does this throughout.
+The fix is to recreate the venv:
+
+```bash
+rm -rf adk_env
+python -m venv adk_env
+./adk_env/bin/python -m pip install -r requirements.txt
+```
+
+`python -m` resolves the interpreter at run time and is immune, which is why
+`run.sh` uses it throughout — it keeps working from a relocated checkout.
+
+Paths containing spaces are *not* a problem: pip emits a `/bin/sh` exec wrapper
+instead of a bare shebang for exactly that case.
 
 ## Layout
 

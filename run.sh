@@ -10,10 +10,14 @@
 # Ctrl-C stops everything.
 #
 # NOTE ON `python -m`: every command here goes through `python -m <module>`
-# rather than the venv's console scripts (adk, uvicorn, ...). Those scripts hard
-# code an absolute interpreter path in their shebang, so they break the moment a
-# virtualenv is moved — and a shebang cannot express a path containing a space
-# at all. `python -m` is immune to both.
+# rather than the venv's console scripts (adk, uvicorn, ...). Those scripts bake
+# an absolute interpreter path into their launcher at install time, so they stop
+# working the moment the virtualenv is moved or renamed; recreating the venv is
+# the fix. `python -m` resolves the interpreter at run time and is immune, so
+# this script keeps working from a relocated checkout.
+#
+# (Paths containing spaces are fine — pip emits a /bin/sh exec wrapper rather
+# than a bare shebang for exactly that case.)
 # =============================================================================
 set -uo pipefail
 

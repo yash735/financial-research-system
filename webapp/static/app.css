@@ -268,6 +268,18 @@ kbd {
   cursor: pointer;
   display: flex; align-items: center; gap: 9px;
 }
+/* Stands in for the chips until a document is uploaded. Deliberately not a
+   chip: there is nothing to click yet, and a disabled-looking button invites
+   the click anyway. */
+.suggest-hint {
+  padding: 10px 13px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-mute);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .chip:hover { border-color: var(--accent); color: var(--text); }
 .chip .icon { width: 14px; height: 14px; color: var(--text-mute); }
 .chip:hover .icon { color: var(--accent); }

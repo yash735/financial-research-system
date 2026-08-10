@@ -86,6 +86,13 @@ def datastore_path() -> str:
 
 DATASTORE_PATH = datastore_path()
 
+# What the indexed corpus actually covers, in plain English (e.g. "Walmart annual
+# reports, FY2021-FY2025"). The router is a zero-thought classifier, so it cannot
+# infer that a question about some other company is out of scope — it has to be
+# told. Left empty the routing rule stays generic, which is what lets a question
+# about an unindexed company get routed to the datastore and come back empty.
+DATASTORE_CORPUS = _env("VERTEX_SEARCH_CORPUS", "")
+
 # --- Thinking budgets -------------------------------------------------------
 # gemini-2.5 models reason before answering. That reasoning is billed in latency
 # on EVERY hop, including the two where it changes nothing, so each agent gets

@@ -100,9 +100,29 @@
   }
 
   /* ── documents ─────────────────────────────────────────────────────── */
+  /* Every suggestion asks about an uploaded filing, and with nothing attached
+     the corpus lane now declines rather than answering from Walmart. Offering
+     them before an upload means the first thing a new visitor clicks is
+     something the system is designed to refuse — which reads as broken. Show
+     them once there is a document to ask about; point at the dropzone until
+     then. */
+  function renderSuggestions() {
+    var ready = state.docs.some(function (d) { return d.status === 'ready'; });
+    if (!ready) {
+      el.suggestions.innerHTML =
+        '<p class="suggest-hint">Drop a filing into the panel on the left to get started — ' +
+        'uploaded documents are what these answers are built from.</p>';
+      return;
+    }
+    el.suggestions.innerHTML = SUGGESTIONS.map(function (s) {
+      return '<button class="chip">' + svg('i-arrow') + '<span>' + md.escape(s) + '</span></button>';
+    }).join('');
+  }
+
   function renderDocs(docs) {
     state.docs = docs || [];
     el.docCount.textContent = state.docs.length ? state.docs.length + ' loaded' : '';
+    renderSuggestions();
 
     el.doclist.innerHTML = state.docs.map(function (d) {
       var meta, bar = '';
@@ -472,10 +492,7 @@
       el.btnTrace.classList.toggle('on', !hidden);
     });
 
-    // suggestions
-    el.suggestions.innerHTML = SUGGESTIONS.map(function (s) {
-      return '<button class="chip">' + svg('i-arrow') + '<span>' + md.escape(s) + '</span></button>';
-    }).join('');
+    renderSuggestions();
     el.suggestions.addEventListener('click', function (e) {
       var chip = e.target.closest('.chip');
       if (chip) send(chip.querySelector('span').textContent);

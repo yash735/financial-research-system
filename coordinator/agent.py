@@ -66,6 +66,46 @@ RESEARCH_MODES: tuple[ResearchMode, ...] = ("normal", "deep")
 # clean source for the "raw gathered material" panel instead of scraping events.
 GATHERED_MATERIAL_KEY = "gathered_material"
 
+# Handed back instead of corpus results while the conversation has no uploads.
+# Phrased as something the analyst can pass straight through: the gatherer is
+# already told to relay an unavailable-data report unchanged rather than
+# substitute another source.
+NO_DOCUMENTS_REFUSAL = (
+    "No document is attached to this conversation, so this question cannot be "
+    "answered from the user's own material. Tell the user to upload the filing "
+    "they want analysed. Do not answer it from any other source."
+)
+
+
+class RequiresUploadedDocuments(AgentTool):
+    """An AgentTool that declines while the session has no uploaded documents.
+
+    Uploads are the source of truth for reported figures; with none attached
+    there is nothing to be truthful against, so the indexed corpus must not
+    quietly answer in their place.
+
+    This is enforced here rather than in the router's instruction because two
+    prompt attempts failed outright. With nothing uploaded, "what was walmart
+    total revenue in fiscal 2024" reached the corpus both times — once with the
+    rule stated after the routing bullets, once with it stated before them AND
+    repeated inside the corpus rule itself. The router has thinking_budget=0 by
+    design, and a negative conditional does not beat a positive match when
+    nothing reasons about the collision. A state lookup has no such failure mode.
+
+    The graph is unchanged, which keeps the asymmetry documented in
+    build_root_agent: lanes are decided at startup, uploads stay per-session.
+    The lane is still built and still visible in the trace — it just declines,
+    so the guard is legible rather than silent.
+    """
+
+    async def run_async(self, *, args: dict, tool_context) -> object:
+        # `uploaded_docs` is the ready manifest the web app writes into session
+        # state on every turn (webapp/api.py). Empty list, or absent entirely
+        # when something else drives the graph, both mean "no uploads".
+        if not tool_context.state.get("uploaded_docs"):
+            return {"result": NO_DOCUMENTS_REFUSAL}
+        return await super().run_async(args=args, tool_context=tool_context)
+
 
 def build_remote_formatter(url: str = "") -> RemoteA2aAgent:
     """Handle to the separate formatter A2A service.
@@ -133,7 +173,15 @@ def build_root_agent(
     if enable_documents:
         tools.append(AgentTool(agent=build_document_agent(deep=deep)))
     if enable_datastore and config.DATASTORE_PATH:
-        tools.append(AgentTool(agent=build_financials_agent(deep=deep)))
+        # Guarded only when uploads are a live lane. With documents disabled the
+        # corpus is the only historical source there is, and gating it on an
+        # upload that can never happen would switch the lane off for good.
+        financials = build_financials_agent(deep=deep)
+        tools.append(
+            RequiresUploadedDocuments(agent=financials)
+            if enable_documents
+            else AgentTool(agent=financials)
+        )
     if enable_market:
         tools.append(AgentTool(agent=build_market_agent(deep=deep)))
 
@@ -148,6 +196,7 @@ def build_root_agent(
             enable_market=enable_market,
             enable_datastore=enable_datastore and bool(config.DATASTORE_PATH),
             enable_documents=enable_documents,
+            datastore_corpus=config.DATASTORE_CORPUS,
         ),
         tools=tools,
         output_key=GATHERED_MATERIAL_KEY,

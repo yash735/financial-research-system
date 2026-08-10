@@ -1,10 +1,48 @@
 # Financial Research System
 
-A multi-agent financial research system built on Google's Agent Development Kit (ADK). It answers questions about public companies by routing each question to the right specialist — a live web-search agent, a retrieval agent over a pre-indexed corpus of annual reports, or a document agent over filings you upload — then hands the gathered material to a **separate analyst service reached over A2A** that compares the sources and writes the final answer.
+Upload a financial filing, ask questions about it, and watch the system decide
+who should answer.
 
-The document pipeline is real: PDFs go through **Google Document AI OCR**, and the extracted text is what gets indexed and searched. Not raw-PDF parsing.
+A multi-agent research tool built on Google's Agent Development Kit. Uploaded
+PDFs are converted by **Google Document AI OCR**; questions are routed across the
+specialists that are live — your uploaded documents, a pre-indexed corpus in
+**Vertex AI Search**, and live web search — and the gathered material is handed to
+a **separate analyst service reached over A2A**, which writes the final answer.
 
-> **Status:** the agent pipeline, the OCR pipeline, and all three deployment paths are working. The browser web app is in active development — see [Roadmap](#roadmap).
+![The app answering a question, with the agent trace panel populated](docs/screenshots/app-dark.png)
+
+The right-hand panel is the point. A multi-agent system that hides its routing is
+indistinguishable from one slow chatbot, so every decision is on screen: which
+specialist was called, what it was asked, how long it took, and — behind a
+disclosure — the exact labelled block the analyst received.
+
+---
+
+## Quickstart
+
+Needs a Google Cloud project with billing, `gcloud`, and Python 3.13.
+
+```bash
+git clone https://github.com/yash735/financial-research-system.git
+cd financial-research-system
+
+python -m venv adk_env
+./adk_env/bin/python -m pip install -r requirements.txt
+
+gcloud auth application-default login
+gcloud auth application-default set-quota-project <your-project-id>
+gcloud services enable aiplatform.googleapis.com documentai.googleapis.com discoveryengine.googleapis.com
+
+cp .env.example .env      # fill in the values marked REQUIRED
+./run.sh                  # → http://127.0.0.1:8000
+```
+
+Drop a 10-K on the page and ask it something. A 97-page annual report OCRs in
+about 15 seconds.
+
+Full setup notes, including how to build the indexed corpus, are in
+[docs/local-development.md](docs/local-development.md) and
+[docs/data-pipeline.md](docs/data-pipeline.md).
 
 ---
 
@@ -12,207 +50,149 @@ The document pipeline is real: PDFs go through **Google Document AI OCR**, and t
 
 ```mermaid
 graph LR
-    U[User question] --> C
+    U([question]) --> G
 
-    subgraph C["coordinator — SequentialAgent"]
+    subgraph C["coordinator · SequentialAgent"]
         direction TB
-        G["<b>gatherer</b><br/>router · emits labelled raw material<br/>no analysis"]
-        G -->|AgentTool| M["<b>market_agent</b><br/>google_search"]
-        G -->|AgentTool| F["<b>financials_agent</b><br/>Vertex AI Search"]
-        G -->|AgentTool| D["<b>document_agent</b><br/>uploaded filings"]
+        G["<b>gatherer</b><br/>routes, gathers<br/><i>no analysis</i>"]
+        G -.AgentTool.-> D["<b>document_agent</b>"]
+        G -.AgentTool.-> F["<b>financials_agent</b>"]
+        G -.AgentTool.-> M["<b>market_agent</b>"]
     end
 
-    C -->|"A2A over HTTP"| FMT
+    D --> DS[(uploaded docs<br/>Document AI + BM25)]
+    F --> VS[(Vertex AI Search<br/>indexed filings)]
+    M --> W((google_search))
 
-    subgraph FMT["formatter service — separate process"]
-        A["<b>formatter_agent</b><br/>analyst · no tools<br/>compare · contrast · format"]
+    G ==>|"labelled raw material"| A
+
+    subgraph P["separate process"]
+        A["<b>formatter_agent</b><br/>analyst · no tools"]
     end
 
-    FMT --> ANS[Final answer]
-
-    M -.-> W((Web))
-    F -.-> DS[(Vertex AI Search<br/>datastore)]
-    D -.-> OCR[(Document AI OCR<br/>+ local retrieval)]
+    A --> ANS([answer])
 ```
 
-Two stages, deliberately split:
+Routing and analysis are split because they are different jobs — a router that
+also writes prose starts editing the evidence on its way past. The analyst runs
+as its own A2A service: independently deployable, and it needs no cloud
+permissions at all because it has no tools.
 
-| Stage | Job | Why separate |
-|---|---|---|
-| **gatherer** | Decide which specialists a question needs, call them, emit their raw output verbatim in labelled sections | Routing and analysis are different skills. A router that also writes prose starts editing the evidence. |
-| **formatter** | Compare and contrast the gathered material, add context, format the answer | Runs as its own A2A service — independently deployable and scalable, and it needs no cloud permissions because it has no tools. |
+Full detail in [docs/architecture.md](docs/architecture.md).
+
+### The document pipeline
+
+```
+PDF ──► Document AI OCR ──► text ──► retrieval ──► Gemini ──► answer
+```
+
+Two retrieval paths, for two different jobs:
+
+- **Uploaded documents** are OCR'd on the fly and searched with an in-process
+  BM25 index over page-anchored passages. Instant — no indexing wait, and every
+  hit carries a page number, so answers cite `(report.pdf, p. 47)`.
+- **The standing corpus** lives in a Vertex AI Search datastore built from the
+  same OCR output.
+
+Uploads deliberately do *not* go through the datastore: indexing takes minutes
+and needs GCS staging, which is unusable in an interactive session.
 
 ---
 
-## Two things Gemini taught me the hard way
+## Three things that were harder than they looked
 
-Both of these are load-bearing. The obvious design fails at runtime in ways that are not obvious from the docs.
+**1. You cannot mix a built-in search tool with any other tool.**
+`google_search` and `VertexAiSearchTool` are Gemini *built-in* grounding tools,
+and Gemini rejects any tool list that pairs a built-in with anything else —
+`Multiple tools are supported only when they are all search tools`. Two built-ins
+cannot coexist either. So each one gets its own isolated sub-agent, surfaced to
+the router as an `AgentTool`; from the router's side those are ordinary
+function-call tools. That single constraint is the reason the specialists exist
+as separate agents rather than as tools on one agent.
 
-### 1. You cannot mix a built-in search tool with any other tool
+**2. Don't hand a large payload to a sub-agent as a tool argument.**
+The intuitive way to reach the analyst is to wrap it as another `AgentTool`. That
+fails: it forces the router to emit a function call whose argument is the entire
+gathered payload, and Gemini 2.5 responds by slipping into code-style
+compositional calling — `print(default_api.formatter_agent(request='''…'''))` —
+which the parser rejects as `MALFORMED_FUNCTION_CALL`, returning an empty answer.
+Handing off through the session with a `SequentialAgent` sidesteps it: the
+gatherer only ever emits plain text. The same reasoning is why `read_document` is
+capped rather than unbounded.
 
-`google_search` and `VertexAiSearchTool` are Gemini **built-in** grounding tools. Gemini rejects any request whose tool list pairs a built-in with anything else — and two different built-ins cannot coexist either:
-
-```
-Multiple tools are supported only when they are all search tools
-```
-
-So the router cannot simply hold both search tools. Each built-in gets its **own isolated sub-agent**, exposed upward as an `AgentTool`. From the router's perspective those are ordinary function-call tools — two function calls, zero built-ins, which Gemini allows. That single constraint is why `market_agent` and `financials_agent` exist as separate agents rather than two tools on one agent.
-
-### 2. Don't hand a large payload to a sub-agent as a tool argument
-
-The intuitive way to reach the formatter is to wrap it as a third `AgentTool`. That fails. It forces the router's LLM to emit a function call whose argument is the *entire* gathered payload — a large multi-line string. Gemini 2.5 responds by slipping into code-style compositional calling:
-
-```python
-print(default_api.formatter_agent(request='''…thousands of characters…'''))
-```
-
-which the parser rejects as **`MALFORMED_FUNCTION_CALL`**, returning an empty answer.
-
-The fix is to hand off through the **session** instead of through an argument: a `SequentialAgent` runs the gatherer, then the formatter, and `RemoteA2aAgent` forwards the text. The gatherer only ever emits plain text, so there is no oversized function call to mangle. Same logical flow, robust.
-
----
-
-## The document pipeline
-
-```
-PDF  ──►  Document AI OCR  ──►  text  ──►  retrieval  ──►  Gemini  ──►  answer
-          (chunked, parallel)              (two paths)      (analysis)
-```
-
-Conversion and analysis are separate concerns, and so is the retrieval step between them:
-
-- **Uploaded documents** are OCR'd on the fly and answered from a lightweight in-process retriever. Instant — no indexing wait.
-- **The standing corpus** lives in a **Vertex AI Search** datastore built from the same OCR output. Managed chunking, embedding and retrieval.
-
-One correctness note worth stating, because it was a real bug: the datastore must be pointed at the **OCR text**, not the source PDFs. An earlier version indexed the bucket root — which held the raw PDFs — so retrieval silently ran on Vertex AI Search's own parser while the Document AI output sat unused in a subfolder. Pointing the datastore at the OCR text is what makes the pipeline actually use its own OCR.
-
-`document_ai/extract.py` handles the conversion. Document AI's online endpoint caps at 15 pages per request, so larger filings are split with `pypdf`, processed chunk by chunk, and stitched back together.
+**3. Index the OCR text, not the PDFs.**
+An earlier version pointed the datastore at the bucket root, which held the
+source PDFs, while the Document AI output sat unused in a subfolder. Everything
+*worked* — it was just answering from Vertex AI Search's own parser instead of
+the pipeline's OCR. Nothing errored; the only tell was the datastore's
+`unstructuredDataSize` not matching the byte total of the text files.
 
 ---
 
-## Quickstart
+## Degrading on purpose
 
-**Prerequisites:** a Google Cloud project with billing, `gcloud` installed, and Python 3.13.
+Capabilities are probed at startup and the agent graph is built to match. If the
+datastore is unreachable, `financials_agent` is **removed from the tool list**
+rather than left in to fail — a broken specialist gets called, burns fifteen
+seconds on a 403, and often still answers confidently from nothing. The router's
+instruction is rebuilt without it too, since describing a specialist that isn't
+there invites the model to invent one.
+
+The same applies to the analyst: `RemoteA2aAgent` resolves its card lazily,
+*mid-turn*, so an unreachable service otherwise fails after the specialists have
+already run. The app probes it up front and swaps in an in-process formatter
+instead. Both are named `formatter_agent`, so the swap is invisible to
+everything downstream.
+
+Whatever is unavailable is shown greyed in the UI with the reason, not hidden.
 
 ```bash
-# 1. Clone and create a virtualenv
-git clone https://github.com/<you>/financial-research-system.git
-cd financial-research-system
-python -m venv adk_env
-source adk_env/bin/activate          # Windows: adk_env\Scripts\activate
-
-# 2. Install
-pip install -r requirements.txt
-
-# 3. Authenticate — ADC, not API keys
-gcloud auth application-default login
-gcloud auth application-default set-quota-project <your-project-id>
-
-# 4. Enable the APIs
-gcloud services enable \
-  aiplatform.googleapis.com \
-  documentai.googleapis.com \
-  discoveryengine.googleapis.com
-
-# 5. Configure
-cp .env.example .env      # then fill in the values marked REQUIRED
+./run.sh --no-formatter    # rehearse the fallback path
 ```
-
-Run it:
-
-```bash
-# Terminal 1 — the formatter A2A service
-uvicorn formatter_agent.agent:a2a_app --host localhost --port 8001
-
-# Terminal 2 — the coordinator
-adk web
-```
-
-Open the URL it prints and pick **coordinator**.
-
-### Authentication: ADC, not API keys
-
-Everything runs on **Vertex AI** using Application Default Credentials. There is no API key anywhere in this repo, and that is deliberate:
-
-- `VertexAiSearchTool` is Vertex-only — an AI Studio key cannot reach a Discovery Engine datastore at all.
-- A public repo plus a live API key is a bad combination. ADC has nothing to leak.
-- Cloud Run and GKE authenticate by service account, so the same code deploys without a secrets story.
-
-One trap worth knowing: `gemini-flash-latest` is an **AI Studio alias** and returns 404 on Vertex. `ADK_MODEL` must be a real publisher model id such as `gemini-2.5-flash`.
-
----
-
-## Building the indexed corpus
-
-Optional — the system runs fine without it, and the lane disables itself cleanly if the datastore is unreachable.
-
-```bash
-# 1. Drop PDFs into document_ai/input_pdfs/, then OCR them
-python document_ai/extract.py          # -> document_ai/output_text/*.txt
-
-# 2. Upload the TEXT (not the PDFs) to a bucket
-gcloud storage cp document_ai/output_text/*.txt gs://<your-bucket>/ocr_text/
-
-# 3. Create a Vertex AI Search datastore pointed at gs://<your-bucket>/ocr_text/
-#    (AI Applications console -> Data Stores -> Create -> Cloud Storage,
-#     unstructured documents, location: global)
-
-# 4. Put its id in .env
-#    VERTEX_SEARCH_DATASTORE=your-datastore-id
-```
-
-Give the datastore a **deterministic id** when you create it. Console-generated ids carry a random suffix, which means every rebuild forces a config change.
-
-Source filings are not included in this repo — get your own from [SEC EDGAR](https://www.sec.gov/edgar/searchedgar/companysearch).
-
----
-
-## Project layout
-
-```
-coordinator/              the routing/gathering agent + its specialists
-  agent.py                SequentialAgent(gatherer -> remote formatter)
-  config.py               environment configuration
-  sub_agents/
-    market_agent.py       google_search        (live market data)
-    financials_agent.py   VertexAiSearchTool   (indexed filings)
-formatter_agent/          standalone A2A analyst service
-  agent.py                to_a2a() -> Starlette app served by uvicorn
-  prompt.py               the analyst instruction (canonical copy)
-document_ai/
-  extract.py              PDF -> Document AI OCR -> text
-k8s/                      GKE deployment: one command up, one command down
-```
-
-**Why `coordinator/` and `formatter_agent/` each carry their own `config.py`:** they are deployed independently (`adk deploy agent_engine ./coordinator`, `gcloud run deploy --source ./formatter_agent`), so neither can import a shared module from the repo root. The duplication is the price of keeping each unit self-contained.
 
 ---
 
 ## Deployment
 
-Three paths, all working:
-
-| Target | Command | Notes |
+| target | command | notes |
 |---|---|---|
-| **GKE** | `./k8s/rebuild.sh` | Creates the cluster, deploys both services, prints the public IP. `./k8s/teardown.sh` deletes everything billable. |
-| **Cloud Run** | `gcloud run deploy` / `adk deploy cloud_run` | Scales to zero. Deploy the formatter first — the coordinator dials its agent card. |
-| **Agent Engine** | `adk deploy agent_engine ./coordinator` | Managed, always-on. |
+| **GKE** | `./k8s/rebuild.sh` | creates the cluster, deploys both services, prints the IP. `./k8s/teardown.sh` deletes everything billable. |
+| **Cloud Run** | `gcloud run deploy` | scales to zero. Deploy the formatter first — the coordinator dials its agent card. |
+| **Agent Engine** | `adk deploy agent_engine ./coordinator` | managed agent runtime, no web app. |
 
-The runtime service account needs three roles — `roles/aiplatform.user`, `roles/discoveryengine.viewer`, and `roles/documentai.apiUser`. Each deployment target runs as a *different* service account, which is the single most common source of runtime 403s here.
+Authentication is Application Default Credentials throughout — **no API keys
+anywhere in this repo**. That is partly hygiene for a public repo and partly
+necessity: `VertexAiSearchTool` is Vertex-only, so an AI Studio key cannot reach
+the datastore at all.
+
+See [docs/deployment.md](docs/deployment.md) and
+[docs/kubernetes.md](docs/kubernetes.md). The runtime service account differs per
+target, which is the most common source of 403s.
 
 ---
 
-## Roadmap
+## Layout
 
-- [x] Multi-agent routing with isolated built-in search tools
-- [x] Remote analyst over A2A, with graceful in-process fallback
-- [x] Document AI OCR pipeline with page-accurate output
-- [x] GKE / Cloud Run / Agent Engine deployment
-- [ ] Browser web app: drag-and-drop upload, live agent-trace panel, streaming answers
-- [ ] In-process retrieval over uploaded documents
+```
+coordinator/          routing agent, specialists, retrieval, capability probes
+formatter_agent/      standalone A2A analyst service
+document_ai/          OCR library + batch CLI
+webapp/               FastAPI backend and the browser UI
+k8s/                  GKE: one command up, one command down
+scripts/              ask.py (terminal client) · check_prompt_sync.py
+docs/                 architecture · local development · data pipeline · deployment · kubernetes
+```
+
+`coordinator/` and `formatter_agent/` each carry their own `config.py` and their
+own copy of the analyst prompt. That duplication is deliberate: each is deployed
+on its own and cannot import from the repo root or from the other.
+`scripts/check_prompt_sync.py` fails the build if the prompts drift.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Source filings are not included; get your own from
+[SEC EDGAR](https://www.sec.gov/edgar/searchedgar/companysearch).

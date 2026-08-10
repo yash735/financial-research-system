@@ -1,45 +1,60 @@
+"""financials_agent — retrieval over a pre-indexed corpus of annual reports.
+
+Holds the VertexAiSearchTool built-in as its ONLY tool. Gemini rejects any tool
+list that pairs a built-in grounding tool with anything else, so this specialist
+stays isolated and is exposed to the router as an AgentTool.
+
+Exposed as a BUILDER rather than a module-level instance because this lane is
+optional: constructing VertexAiSearchTool without a datastore is meaningless, so
+the coordinator only calls this when one is configured and reachable.
+"""
+
+from __future__ import annotations
+
 from google.adk.agents import Agent
 from google.adk.tools import VertexAiSearchTool
 
 from .. import config
 
-# ---------------------------------------------------------------------------
-# The datastore holding the pre-indexed annual reports comes from configuration
-# (VERTEX_SEARCH_DATASTORE), not from a literal path in source.
+# Two things worth knowing about the datastore this is designed against:
 #
-# Two things worth knowing about the datastore this was built against:
-#   1. It has a DETERMINISTIC id (no random suffix), so rebuilding it reuses the
-#      same id and no code has to change — retiring the old "new datastore =
-#      new ID, go edit this line" chore.
-#   2. It indexes the Document AI OCR *text*, not the source PDFs. An earlier
-#      version pointed at the bucket root and silently indexed raw PDFs, so
-#      retrieval ran on Vertex AI Search's own parser while the OCR output sat
-#      unused. Pointing it at the ocr_text/ subfolder was the fix.
-#      See docs/data-pipeline.md.
-# ---------------------------------------------------------------------------
-DATASTORE_PATH = config.DATASTORE_PATH
+#   1. Give it a DETERMINISTIC id. Console-generated ids carry a random suffix,
+#      so every rebuild would otherwise force a configuration change.
+#   2. It must index the Document AI OCR *text*, not the source PDFs. An earlier
+#      version of this project pointed the datastore at a bucket root holding
+#      the raw PDFs, so retrieval silently ran on Vertex AI Search's own parser
+#      while the OCR output sat unused in a subfolder. See docs/data-pipeline.md.
 
-# Grounds this agent's answers on the indexed filings.
-vertex_search_tool = VertexAiSearchTool(data_store_id=DATASTORE_PATH)
-
-# financials_agent: answers strictly from the indexed 10-K / annual statements.
-# Holds the VertexAiSearchTool built-in as its ONLY tool, isolated from the
-# coordinator's other tools.
-financials_agent = Agent(
-    name="financials_agent",
-    model=config.MODEL,
-    instruction=(
-        "You are a Walmart financial analyst. Answer questions ONLY using the indexed "
-        "Walmart 10-K / annual financial statements for fiscal years FY2021 through FY2025, "
-        "retrieved via the Vertex AI Search tool.\n\n"
-        "Scope of what you can answer: revenue, net income, gross and operating margins, "
-        "segment performance (Walmart U.S., Walmart International, Sam's Club), and "
-        "year-over-year changes.\n\n"
-        "Rules:\n"
-        "1. Always cite the source document and fiscal year for every figure you report.\n"
-        "2. Do not use outside or current-market knowledge — only the retrieved documents.\n"
-        "3. If the answer is not contained in the indexed statements, clearly say it is not "
-        "available in the financial statements rather than guessing."
-    ),
-    tools=[vertex_search_tool],
+INSTRUCTION = (
+    "You are a financial analyst working from a pre-indexed corpus of annual "
+    "reports and 10-K filings, retrieved through the Vertex AI Search tool.\n\n"
+    "What you can answer: revenue, net income, gross and operating margins, "
+    "segment performance, and year-over-year changes — for whichever companies "
+    "and fiscal years the corpus covers.\n\n"
+    "Rules:\n"
+    "1. Cite the source document and fiscal year for every figure you report. A "
+    "figure without a period attached is not useful.\n"
+    "2. Use ONLY the retrieved documents. Do not supplement with outside or "
+    "current-market knowledge — other specialists cover that.\n"
+    "3. If the answer is not in the indexed filings, say so clearly rather than "
+    "guessing. State what you searched for, so the router knows the gap is real "
+    "and not a phrasing problem."
 )
+
+
+def build_financials_agent() -> Agent:
+    """Construct the specialist. Requires a configured datastore."""
+    if not config.DATASTORE_PATH:
+        raise ValueError(
+            "VERTEX_SEARCH_DATASTORE is not configured — cannot build financials_agent."
+        )
+    return Agent(
+        name="financials_agent",
+        model=config.MODEL,
+        description=(
+            "Answers questions about historical financial results from a "
+            "pre-indexed corpus of annual reports and 10-K filings."
+        ),
+        instruction=INSTRUCTION,
+        tools=[VertexAiSearchTool(data_store_id=config.DATASTORE_PATH)],
+    )

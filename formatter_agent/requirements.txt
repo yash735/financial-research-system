@@ -1,0 +1,20 @@
+# Self-contained requirements for the formatter A2A service.
+#
+# Deliberately minimal: the formatter has NO tools. It never touches a
+# datastore, a search API, or Cloud Storage — it only analyses text handed to
+# it over A2A. That is why google-cloud-aiplatform and google-cloud-documentai
+# are absent here, and it keeps this image small and fast to cold-start.
+
+# google-adk[a2a] pulls in a2a-sdk, which powers to_a2a() and the agent card.
+google-adk[a2a]==2.3.0
+
+# a2a-sdk[http-server] adds sse-starlette, which the SERVED A2A app requires at
+# startup — without it uvicorn dies with
+# "Packages starlette and sse-starlette are required".
+a2a-sdk[http-server]==0.3.26
+
+uvicorn==0.50.2
+
+# Loads this package's .env when served directly by uvicorn (`adk web` would
+# auto-load it; a bare uvicorn run does not).
+python-dotenv==1.2.2

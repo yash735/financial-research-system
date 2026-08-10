@@ -1,0 +1,49 @@
+# --- Python virtualenvs -----------------------------------------------------
+adk_env/
+.venv/
+venv/
+env/
+
+# --- Python bytecode / caches ----------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Environment config -----------------------------------------------------
+# Real .env files carry the GCP project id / processor id and are NOT committed.
+# The .env.example files ARE committed and document every key.
+.env
+*/.env
+!.env.example
+!*/.env.example
+
+# --- ADK local state --------------------------------------------------------
+# `adk web` writes per-agent session databases here.
+.adk/
+*/.adk/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Runtime caches / scratch ----------------------------------------------
+.cache/
+.run/
+*.log
+
+# --- Source documents and OCR output ---------------------------------------
+# Excluded for size (~11 MB) and because they are third-party copyrighted
+# filings. Fetch your own from SEC EDGAR: https://www.sec.gov/edgar/searchedgar/companysearch
+document_ai/input_pdfs/*
+!document_ai/input_pdfs/.gitkeep
+document_ai/output_text/*
+!document_ai/output_text/.gitkeep
+
+# --- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

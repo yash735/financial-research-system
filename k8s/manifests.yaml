@@ -1,0 +1,174 @@
+# GKE (Standard) manifests for the two-service ADK stack.
+#
+# DO NOT `kubectl apply` this file directly — the __PLACEHOLDER__ tokens are
+# substituted from your .env by rebuild.sh, which keeps project-specific
+# identifiers out of version control:
+#
+#   ./k8s/rebuild.sh                 # renders + applies
+#   kubectl -n adk get pods -w       # watch
+#   kubectl -n adk get svc coordinator   # grab EXTERNAL-IP
+#
+# Both pods run as the KSA `adk-agents`, bound by Workload Identity to a Google
+# service account that needs THREE roles:
+#   roles/aiplatform.user        Gemini on Vertex (every agent)
+#   roles/discoveryengine.viewer the Vertex AI Search datastore (financials_agent)
+#   roles/documentai.apiUser     OCR for uploaded documents
+# See docs/kubernetes.md.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: adk
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: adk-agents
+  namespace: adk
+  annotations:
+    iam.gke.io/gcp-service-account: __GSA_EMAIL__
+---
+# ============================ formatter (internal) ============================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: formatter-agent
+  namespace: adk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: formatter-agent
+  template:
+    metadata:
+      labels:
+        app: formatter-agent
+    spec:
+      serviceAccountName: adk-agents
+      containers:
+        - name: formatter-agent
+          image: __IMAGE_BASE__/formatter-agent:__IMAGE_TAG__
+          ports:
+            - containerPort: 8080
+          env:
+            # Vertex config. These used to ride along in a .env baked into the
+            # image; that file is no longer committed or copied in, so the
+            # cluster must supply them explicitly.
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "TRUE"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: __PROJECT_ID__
+            - name: GOOGLE_CLOUD_LOCATION
+              value: __LOCATION__
+            - name: ADK_MODEL
+              value: __MODEL__
+            # Baked INTO the agent card's advertised `url`
+            # (rpc_url = "{protocol}://{host}:{port}/"). Point them at this
+            # Service's in-cluster DNS so the coordinator can actually reach it.
+            - name: A2A_HOST
+              value: formatter-agent
+            - name: A2A_PORT
+              value: "8080"
+            - name: A2A_PROTOCOL
+              value: http
+          readinessProbe:
+            httpGet:
+              path: /.well-known/agent-card.json
+              port: 8080
+            initialDelaySeconds: 10
+          resources:
+            # CPU request is a scheduling RESERVATION, not a usage cap. e2-medium
+            # exposes only ~940m allocatable and GKE system pods already reserve
+            # most of it, so these are sized tiny to fit a single node. No CPU
+            # limit, so the near-idle app still bursts on the node's free vCPU.
+            requests:
+              cpu: "20m"
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: formatter-agent
+  namespace: adk
+spec:
+  # ClusterIP (default) — internal only. Resolves as http://formatter-agent:8080
+  # from other pods in this namespace.
+  selector:
+    app: formatter-agent
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# =========================== coordinator (public) ============================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+  namespace: adk
+spec:
+  # Single replica on purpose: session state is held in-process, so >1 replica
+  # would split sessions across pods.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coordinator
+  template:
+    metadata:
+      labels:
+        app: coordinator
+    spec:
+      serviceAccountName: adk-agents
+      containers:
+        - name: coordinator
+          image: __IMAGE_BASE__/coordinator:__IMAGE_TAG__
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GOOGLE_GENAI_USE_VERTEXAI
+              value: "TRUE"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: __PROJECT_ID__
+            - name: GOOGLE_CLOUD_LOCATION
+              value: __LOCATION__
+            - name: ADK_MODEL
+              value: __MODEL__
+            # Both the card-fetch host AND the card's advertised url must be
+            # this in-cluster Service (see the formatter's A2A_* above).
+            - name: FORMATTER_A2A_URL
+              value: http://formatter-agent:8080/.well-known/agent-card.json
+            # Optional indexed-filings lane. Empty disables it cleanly.
+            - name: VERTEX_SEARCH_DATASTORE
+              value: "__DATASTORE__"
+            - name: ENABLE_DATASTORE
+              value: auto
+            # Document AI, for the uploaded-document lane.
+            - name: DOCAI_LOCATION
+              value: __DOCAI_LOCATION__
+            - name: DOCAI_PROCESSOR_ID
+              value: "__DOCAI_PROCESSOR_ID__"
+          readinessProbe:
+            httpGet:
+              path: /list-apps
+              port: 8080
+            initialDelaySeconds: 15
+          resources:
+            requests:
+              cpu: "40m"
+              memory: "512Mi"
+            limits:
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: adk
+spec:
+  type: LoadBalancer          # GKE provisions a public IP
+  selector:
+    app: coordinator
+  ports:
+    - port: 80
+      targetPort: 8080

@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.DS_Store
+.adk/
+*.db
+Dockerfile
+.dockerignore
+
+# NEVER bake a developer's local .env into a pushed image. Cloud Run and
+# Kubernetes supply configuration through the service environment instead
+# (see k8s/manifests.yaml and docs/deployment.md).
+.env

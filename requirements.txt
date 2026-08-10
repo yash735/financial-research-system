@@ -1,0 +1,33 @@
+# Financial Research System — full local development environment.
+#
+# Installs everything: the web app, both agent packages, and the Document AI
+# pipeline. Per-package subsets used for isolated cloud deploys live in
+# coordinator/requirements.txt and formatter_agent/requirements.txt.
+#
+# Versions are pinned to what this project was built and verified against
+# (Python 3.13). google-adk in particular moves fast and has twice changed
+# behaviour this project depends on — see docs/architecture.md.
+
+# --- Agent framework --------------------------------------------------------
+# [a2a] pulls in a2a-sdk, needed for RemoteA2aAgent (coordinator) and to_a2a
+# (formatter). a2a-sdk[http-server] adds sse-starlette, which the *served* A2A
+# app requires at startup.
+google-adk[a2a]==2.3.0
+a2a-sdk[http-server]==0.3.26
+
+# --- Vertex AI --------------------------------------------------------------
+# Required by financials_agent's VertexAiSearchTool and by Agent Engine deploys.
+# Also supplies google.auth, which health.py uses for the datastore probe.
+google-cloud-aiplatform[agent_engines,adk]==1.159.0
+
+# --- Web app ----------------------------------------------------------------
+fastapi==0.139.0
+uvicorn==0.50.2
+python-multipart==0.0.32          # multipart/form-data file uploads
+sse-starlette==3.4.5              # SSE streaming for the chat endpoint
+httpx==0.28.1                     # formatter agent-card probe
+python-dotenv==1.2.2
+
+# --- Document AI OCR pipeline ----------------------------------------------
+google-cloud-documentai==3.15.0
+pypdf==6.14.2                     # splits PDFs into <=15-page OCR chunks

@@ -1,0 +1,20 @@
+# Self-contained requirements for deploying just ./coordinator.
+#
+# This package must install and run WITHOUT the repo root, because
+# `adk deploy agent_engine ./coordinator` ships only this folder. Nothing here
+# may reference a parent-directory module.
+#
+# document_store.py and retrieval.py are deliberately stdlib-only, so the
+# uploaded-document lane adds no dependencies at all.
+
+# [a2a] pulls in a2a-sdk for RemoteA2aAgent (the remote formatter service).
+google-adk[a2a]==2.3.0
+
+# financials_agent's VertexAiSearchTool + Agent Engine packaging. Also provides
+# google.auth, used by health.py's datastore probe.
+google-cloud-aiplatform[agent_engines,adk]==1.159.0
+
+# Declared explicitly (both are transitive today) because config.py and
+# health.py import them directly.
+httpx==0.28.1
+python-dotenv==1.2.2

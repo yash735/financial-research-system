@@ -285,6 +285,7 @@
     var nodes = {};       // agent -> trace node
     var calls = {};       // tool key -> call element
     var answer = '';
+    var lastError = '';
     var controller = new AbortController();
     state.abort = controller;
 
@@ -363,7 +364,11 @@
             el.gatheredText.textContent = d.text;
             break;
           case 'error':
-            toast(d.message || 'Something went wrong.');
+            // Surface it in the transcript as well as a toast. A bare "no
+            // answer" with the reason only in a toast that fades away is not
+            // debuggable, and quota exhaustion is the likeliest demo failure.
+            lastError = d.message || 'Something went wrong.';
+            toast(lastError);
             break;
           case 'done':
             if (d.answer && !answer) {
@@ -379,7 +384,9 @@
         Object.keys(nodes).forEach(function (k) { nodes[k].classList.remove('live'); });
         turn.thinking.style.display = 'none';
         if (!turn.body.innerHTML) {
-          turn.body.innerHTML = '<p style="color:var(--text-mute)">No answer was returned.</p>';
+          turn.body.innerHTML = lastError
+            ? '<p class="turn-error">' + md.escape(lastError) + '</p>'
+            : '<p style="color:var(--text-mute)">No answer was returned.</p>';
         }
         setStreaming(false);
         state.abort = null;

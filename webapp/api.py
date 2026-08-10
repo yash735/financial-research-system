@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -22,6 +23,37 @@ router = APIRouter(prefix="/api")
 
 def _state(request: Request) -> AppState:
     return request.app.state.app_state
+
+
+def _friendly_error(exc: Exception) -> str:
+    """Turn a model/backend failure into something a viewer can act on.
+
+    A raw `_ResourceExhaustedError: 429 RESOURCE_EXHAUSTED {...}` in a toast is
+    useless to anyone watching a demo, and quota exhaustion is the single most
+    likely failure after a burst of questions.
+    """
+    text = str(exc)
+    lowered = text.lower()
+
+    if "429" in text or "resource_exhausted" in lowered or "quota" in lowered:
+        return (
+            "Vertex AI quota exhausted — too many requests in a short window. "
+            "Wait a minute and ask again; nothing is broken."
+        )
+    if "403" in text or "permission_denied" in lowered:
+        return (
+            "Permission denied by Google Cloud. The service account is likely "
+            "missing roles/aiplatform.user, roles/discoveryengine.viewer or "
+            "roles/documentai.apiUser."
+        )
+    if "404" in text and "model" in lowered:
+        return (
+            f"Model not found: {os.environ.get('ADK_MODEL', 'unset')!r}. It must "
+            "be a Vertex publisher model id — AI Studio aliases 404 on Vertex."
+        )
+    if "deadline" in lowered or "timeout" in lowered:
+        return "The model call timed out. Try again, or ask a narrower question."
+    return f"{type(exc).__name__}: {text[:300]}"
 
 
 # ---------------------------------------------------------------------------
@@ -179,11 +211,7 @@ async def chat(request: Request) -> EventSourceResponse:
 
         except Exception as exc:  # noqa: BLE001
             log.exception("Chat turn failed")
-            yield {
-                "data": json.dumps(
-                    mapper.error(f"{type(exc).__name__}: {exc}", where="run")
-                )
-            }
+            yield {"data": json.dumps(mapper.error(_friendly_error(exc), where="run"))}
 
         yield {"data": json.dumps(mapper.done())}
 

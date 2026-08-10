@@ -505,3 +505,15 @@ body.streaming .send-btn .icon-stop { display: block }
   .transcript, .composer-wrap { padding-left: 16px; padding-right: 16px }
   .btn-label { display: none }
 }
+
+/* An error shown in place of an answer — quota exhaustion, IAM, model id. */
+.turn-error {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  color: var(--text-dim);
+  font-size: 13.5px;
+}

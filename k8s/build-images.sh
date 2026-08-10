@@ -29,9 +29,12 @@ echo "==> Building + pushing formatter image…"
 gcloud builds submit "$ROOT/formatter_agent" \
   --tag "$BASE/formatter-agent:$TAG" --project="$PROJECT"
 
-echo "==> Building + pushing coordinator image…"
-gcloud builds submit "$ROOT/coordinator" \
-  --tag "$BASE/coordinator:$TAG" --project="$PROJECT"
+echo "==> Building + pushing web app image (includes the coordinator package)…"
+# Built from the REPO ROOT: the web app imports webapp/, coordinator/ and
+# document_ai/. The formatter above is built from its own folder because it is
+# deployed independently.
+gcloud builds submit "$ROOT" \
+  --tag "$BASE/webapp:$TAG" --project="$PROJECT"
 
 echo
 echo "DONE. Both images are in Artifact Registry as :$TAG."

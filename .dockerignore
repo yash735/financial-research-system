@@ -1,0 +1,33 @@
+# Virtualenvs — the image installs its own dependencies.
+adk_env/
+.venv/
+venv/
+
+# NEVER bake a developer's local .env into a pushed image. Cloud Run and
+# Kubernetes supply configuration through the service environment.
+.env
+*/.env
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime scratch
+.cache/
+.run/
+*.log
+*.db
+
+# Source documents and OCR output — large, and not needed at runtime.
+document_ai/input_pdfs/
+document_ai/output_text/
+
+# Repo furniture
+.git/
+.gitignore
+docs/
+k8s/
+scripts/
+README.md
+LICENSE
+.DS_Store

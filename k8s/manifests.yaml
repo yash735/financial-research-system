@@ -6,7 +6,7 @@
 #
 #   ./k8s/rebuild.sh                 # renders + applies
 #   kubectl -n adk get pods -w       # watch
-#   kubectl -n adk get svc coordinator   # grab EXTERNAL-IP
+#   kubectl -n adk get svc webapp        # grab EXTERNAL-IP
 #
 # Both pods run as the KSA `adk-agents`, bound by Workload Identity to a Google
 # service account that needs THREE roles:
@@ -101,28 +101,33 @@ spec:
     - port: 8080
       targetPort: 8080
 ---
-# =========================== coordinator (public) ============================
+# ============================= web app (public) ==============================
+# This image contains the coordinator package as well — the web app drives the
+# agent through an ADK Runner in-process, so there is no separate coordinator
+# workload. The only network hop between agents is the A2A call to the
+# formatter Service above, which is exactly the boundary worth having.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: coordinator
+  name: webapp
   namespace: adk
 spec:
-  # Single replica on purpose: session state is held in-process, so >1 replica
-  # would split sessions across pods.
+  # Single replica on purpose: conversation state AND uploaded documents are
+  # held in the serving process, so a second replica would split sessions and
+  # make an upload invisible to the next request.
   replicas: 1
   selector:
     matchLabels:
-      app: coordinator
+      app: webapp
   template:
     metadata:
       labels:
-        app: coordinator
+        app: webapp
     spec:
       serviceAccountName: adk-agents
       containers:
-        - name: coordinator
-          image: __IMAGE_BASE__/coordinator:__IMAGE_TAG__
+        - name: webapp
+          image: __IMAGE_BASE__/webapp:__IMAGE_TAG__
           ports:
             - containerPort: 8080
           env:
@@ -150,25 +155,29 @@ spec:
               value: "__DOCAI_PROCESSOR_ID__"
           readinessProbe:
             httpGet:
-              path: /list-apps
+              path: /api/health
               port: 8080
-            initialDelaySeconds: 15
+            # Startup probes the formatter card and the datastore before the
+            # app reports ready, so give it room.
+            initialDelaySeconds: 20
+            periodSeconds: 10
           resources:
             requests:
               cpu: "40m"
               memory: "512Mi"
             limits:
-              memory: "1Gi"
+              # Uploaded documents and their indexes live in this process.
+              memory: "1.5Gi"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: coordinator
+  name: webapp
   namespace: adk
 spec:
   type: LoadBalancer          # GKE provisions a public IP
   selector:
-    app: coordinator
+    app: webapp
   ports:
     - port: 80
       targetPort: 8080

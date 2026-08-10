@@ -49,12 +49,12 @@ kubectl apply -f "$RENDERED"
 
 echo "==> Waiting for both services to be ready…"
 kubectl -n adk rollout status deploy/formatter-agent --timeout=180s
-kubectl -n adk rollout status deploy/coordinator     --timeout=180s
+kubectl -n adk rollout status deploy/webapp          --timeout=240s
 
 echo "==> Waiting for the public IP (LoadBalancer)…"
 IP=""
 for _ in $(seq 1 30); do
-  IP=$(kubectl -n adk get svc coordinator -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+  IP=$(kubectl -n adk get svc webapp -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
   [ -n "$IP" ] && break
   sleep 5
 done
@@ -62,7 +62,7 @@ done
 echo
 echo "================================================================="
 echo " READY.  Open this in a browser:"
-echo "     http://${IP:-<pending — run: kubectl -n adk get svc coordinator>}/"
+echo "     http://${IP:-<pending — run: kubectl -n adk get svc webapp>}/"
 echo "================================================================="
 echo "(The IP is new on every rebuild — that's expected.)"
 echo "When you're done:   ./k8s/teardown.sh"

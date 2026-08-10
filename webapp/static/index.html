@@ -1,1 +1,122 @@
-<h1>Financial Research System</h1><p>UI loading…</p>
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Financial Research System</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+</defs></svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <div class="brand-text">
+      <strong>Financial Research System</strong>
+      <span id="brand-sub">multi-agent · Document AI · Vertex AI</span>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button id="btn-trace" class="icon-btn" title="Toggle agent trace (⌘\)" aria-label="Toggle agent trace">
+      <svg class="icon"><use href="#i-activity"/></svg><span class="btn-label">Trace</span>
+    </button>
+    <button id="btn-theme" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
+      <svg class="icon icon-sun"><use href="#i-sun"/></svg>
+      <svg class="icon icon-moon"><use href="#i-moon"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="shell" id="shell">
+
+  <!-- ─────────── left rail ─────────── -->
+  <aside class="rail" id="rail">
+    <section class="card">
+      <h2 class="card-title">Capabilities</h2>
+      <ul class="lanes" id="lanes"><li class="lane skeleton"></li><li class="lane skeleton"></li><li class="lane skeleton"></li></ul>
+      <div class="formatter-row" id="formatter-row"></div>
+    </section>
+
+    <section class="card card-grow">
+      <h2 class="card-title">
+        Documents
+        <span class="count" id="doc-count"></span>
+      </h2>
+
+      <button class="dropzone" id="dropzone" type="button">
+        <svg class="icon"><use href="#i-upload"/></svg>
+        <span class="dz-main">Drop a filing here</span>
+        <span class="dz-sub">or click to browse · PDF, PNG, JPEG</span>
+      </button>
+      <input type="file" id="file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff" hidden>
+
+      <ul class="doclist" id="doclist"></ul>
+      <p class="rail-hint" id="rail-hint">Uploads are OCR'd with Document AI and held in memory for this session only.</p>
+    </section>
+  </aside>
+
+  <!-- ─────────── centre ─────────── -->
+  <section class="chat">
+    <div class="transcript" id="transcript">
+      <div class="empty" id="empty">
+        <h1>Ask about a filing.</h1>
+        <p>
+          Upload an annual report or 10-K and ask questions about it. Questions are routed
+          across the specialists that are live — your uploaded documents, an indexed corpus
+          of filings, and live market data — then written up by a separate analyst service.
+        </p>
+        <div class="suggestions" id="suggestions"></div>
+      </div>
+    </div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Ask a question about the filing…" autocomplete="off"></textarea>
+        <button id="btn-send" class="send-btn" title="Send (Enter)" aria-label="Send">
+          <svg class="icon icon-send"><use href="#i-send"/></svg>
+          <svg class="icon icon-stop"><use href="#i-stop"/></svg>
+        </button>
+      </div>
+      <p class="composer-hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</p>
+    </div>
+  </section>
+
+  <!-- ─────────── right rail ─────────── -->
+  <aside class="trace" id="trace">
+    <div class="trace-head">
+      <h2 class="card-title">Agent trace</h2>
+      <span class="trace-total" id="trace-total"></span>
+    </div>
+    <div class="trace-body" id="trace-body">
+      <p class="trace-empty">The routing decisions for each question appear here — which specialists were called, what they were asked, and how long each took.</p>
+    </div>
+    <details class="gathered" id="gathered" hidden>
+      <summary><svg class="icon chev"><use href="#i-chevron"/></svg> Raw gathered material</summary>
+      <pre id="gathered-text"></pre>
+    </details>
+  </aside>
+</main>
+
+<div class="drop-overlay" id="drop-overlay"><div class="drop-inner"><svg class="icon"><use href="#i-upload"/></svg><span>Drop to upload</span></div></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/md.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

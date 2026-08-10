@@ -80,13 +80,119 @@ permissions at all because it has no tools.
 
 Full detail in [docs/architecture.md](docs/architecture.md).
 
-### The document pipeline
+---
+
+## What actually happens, step by step
+
+### Part 1 — a PDF becomes searchable
 
 ```
-PDF ──► Document AI OCR ──► text ──► retrieval ──► Gemini ──► answer
+   drag a PDF onto the page
+            │
+   1. POST /api/documents ─────────────────────────── webapp/api.py
+            │  multipart, with the session id
+            ▼
+   2. validate ──────────────────────────────────────  webapp/ingest.py
+            │  magic bytes (%PDF-, not the filename or content-type header)
+            │  size cap · per-session document cap
+            ▼
+   3. register + return 202 IMMEDIATELY ─────────────  coordinator/document_store.py
+            │  uuid doc_id, status "processing", sha256 of the bytes
+            │  the browser starts polling GET /api/documents once a second
+            ▼
+   4. OCR on a worker thread ────────────────────────  document_ai/ocr.py
+            │
+            ├─ cache hit on sha256?  →  .cache/ocr/<hash>.json  →  skip to 5
+            │
+            ├─ count_pages()                            pypdf, no network
+            ├─ iter_page_chunks()                       split into <=15-page slices
+            │                                           (Document AI's online limit)
+            ├─ ThreadPoolExecutor, 4 workers            process_document() blocks,
+            │                                           so chunks fan out in parallel
+            │     each chunk → Document AI OCR processor, raw bytes, no GCS
+            │
+            ├─ per-page text                            slice document.text by each
+            │                                           page's text_anchor offsets —
+            │                                           this is what makes page
+            │                                           citations possible later
+            └─ progress callback → store.set_progress   drives the rail's progress bar
+            ▼
+   5. mark_ready() ──────────────────────────────────  coordinator/retrieval.py
+            │  chunk_pages()   ~1200-char passages, never crossing a page
+            │                  boundary, 200-char overlap
+            │  Bm25Index.build()  tokenise, document frequencies
+            ▼
+      status "ready" — 97 pages in ~15s, or 0s on a cache hit
 ```
 
-Two retrieval paths, for two different jobs:
+Nothing is written to disk except the OCR text cache. The uploaded bytes never
+touch the filesystem.
+
+### Part 2 — a question becomes an answer
+
+```
+   you type a question
+            │
+   1. POST /api/chat  (SSE stream) ─────────────────── webapp/api.py
+            │  {session_id, message, mode}
+            │  picks the normal or deep runner
+            ▼
+   2. build state_delta ─────────────────────────────  webapp/state.py
+            │  uploaded_docs        a MANIFEST only (id, filename, pages)
+            │  uploaded_docs_summary  "report.pdf (97 pages)"
+            │  the document TEXT stays in the store — putting it in session
+            │  state would serialise it into every event
+            ▼
+   ┌─ HOP 1 ─ gatherer ──────────────────────────────  coordinator/agent.py
+   │        reads {uploaded_docs_summary?} in its instruction
+   │        decides which specialists this question needs
+   │        emits AgentTool calls — several in one turn run concurrently
+   │        thinking OFF in both modes (it is a classification)
+   └────────────────────────────────────────────────────────────┐
+            ▼                                                    │
+   ┌─ HOP 2 ─ specialist(s), in parallel ────────────────────────┤
+   │                                                             │
+   │  document_agent          coordinator/sub_agents/document_agent.py
+   │    list_uploaded_documents()  reads THIS session's manifest
+   │    search_documents(query)    validates the doc_id against that
+   │                               manifest, then BM25 over the passages,
+   │                               boosting fiscal-year and numeric terms
+   │    read_document(...)         capped at 24k chars per call
+   │    → excerpts with (filename, p. N)
+   │                                                             │
+   │  financials_agent   → VertexAiSearchTool over the datastore  │
+   │  market_agent       → google_search                          │
+   │                                                             │
+   │  thinking OFF in normal mode, ON in deep mode                │
+   └────────────────────────────────────────────────────────────┘
+            ▼
+   3. gatherer lays out the RAW material, verbatim, in labelled sections
+            │    [UPLOADED DOCUMENTS] / [HISTORICAL FILINGS] /
+            │    [CURRENT MARKET]     / [USER QUESTION]
+            │  saved to session state via output_key="gathered_material"
+            │  (this is what the trace panel's disclosure shows you)
+            ▼
+   ┌─ HOP 3 ─ analyst ───────────────────────────────  formatter_agent/agent.py
+   │        RemoteA2aAgent forwards that text over HTTP to a SEPARATE
+   │        process — or an in-process fallback if the card is unreachable
+   │        compares, contrasts, adds interpretation, keeps every citation
+   │        thinking ALWAYS ON
+   └────────────────────────────────────────────────────────────┘
+            ▼
+   4. events → SSE envelopes ────────────────────────  webapp/trace.py
+            │  agent_start · tool_call · tool_result
+            │  answer_delta / answer_done · gathered · done
+            ▼
+   5. the browser renders ───────────────────────────  webapp/static/app.js
+              status line in the transcript  ("Searching your uploaded documents… 7.0s")
+              live timeline in the trace rail
+              markdown answer, with the citations intact
+```
+
+Roughly 3.3s + 13s + 7s in normal mode. The specialist hop dominates, which is
+why the transcript shows a live status line rather than a spinner.
+
+### Two retrieval paths, for two different jobs
 
 - **Uploaded documents** are OCR'd on the fly and searched with an in-process
   BM25 index over page-anchored passages. Instant — no indexing wait, and every

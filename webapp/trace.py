@@ -62,6 +62,7 @@ def _preview(value: Any, limit: int) -> str:
 class TraceMapper:
     """Stateful mapper for one turn. Not reusable across turns."""
 
+    mode: str = "normal"
     started_at: float = field(default_factory=time.monotonic)
     _seq: int = 0
     _last_author: str = ""
@@ -84,7 +85,7 @@ class TraceMapper:
 
     # -- lifecycle ----------------------------------------------------------
     def start(self) -> dict:
-        return self._event("start")
+        return self._event("start", mode=self.mode)
 
     def error(self, message: str, where: str = "") -> dict:
         return self._event("error", message=message, where=where)
@@ -102,6 +103,7 @@ class TraceMapper:
             "done",
             answer="".join(self._answer),
             elapsed_ms=int((time.monotonic() - self.started_at) * 1000),
+            mode=self.mode,
         )
 
     @property

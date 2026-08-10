@@ -110,6 +110,43 @@ The lexical choice is not a shortcut: financial questions are keyword-shaped
 terms get an extra weight because in a filing the difference between the right
 answer and a plausible wrong one is usually the year.
 
+## Thinking budgets
+
+`gemini-2.5` models reason before answering, billed in latency on every hop.
+Measured on this pipeline: router 3.3s, specialists 13s, analyst 7–14s.
+
+`LlmAgent.generate_content_config` carries a `ThinkingConfig` through
+`flows/llm_flows/basic.py` into the model call untouched. `thinking_budget=0`
+disables reasoning; `-1` is the model's own default. Measured directly on a
+routing-shaped prompt:
+
+| | latency | thought tokens |
+|---|---|---|
+| model default | 2.57s | 326 |
+| `thinking_budget=-1` | 2.74s | 360 |
+| `thinking_budget=0` | **0.72s** | **0** |
+
+Budgets are set at **construction** time, not per request, which is why the web
+app builds one graph per research mode rather than mutating a live agent — the
+latter would race across concurrent requests.
+
+The analyst's budget is never lowered. It also runs in a separate process behind
+A2A, where a per-request toggle could not reach it anyway; the constraint and the
+intent agree.
+
+### Where the perceived wait actually is
+
+Streaming the analyst turned out **not** to be the perceived-latency fix. The
+in-process analyst does stream, but measurement showed first text arriving at
+18.9s of a 21.7s turn — the wait is the specialists, not the write-up. The fix
+was to surface the current phase in the transcript itself (spinner, plain
+status, live counter) rather than only in the trace rail.
+
+`RemoteA2aAgent` does not stream at all: ADK sets `streaming=False`
+(`remote_a2a_agent.py:245`), the legacy handler drops partial artifacts, and the
+A2A server builds `RunConfig()` with `streaming_mode=NONE`. Enabling it needs
+four coordinated changes for roughly 3s of tail, so it is deliberately not done.
+
 ## Capability detection changes the graph
 
 | | when it is decided | what happens when unavailable |

@@ -86,6 +86,57 @@ def datastore_path() -> str:
 
 DATASTORE_PATH = datastore_path()
 
+# --- Thinking budgets -------------------------------------------------------
+# gemini-2.5 models reason before answering. That reasoning is billed in latency
+# on EVERY hop, including the two where it changes nothing, so each agent gets
+# its own budget rather than inheriting the model default.
+#
+#    0  disables thinking entirely
+#   -1  automatic — the model decides (this is the model's own default)
+#   >0  an explicit token budget
+#
+# Where the numbers come from, measured on this pipeline:
+#
+#   router       3.3s/question. It performs a 3-way classification — "which
+#                specialists does this need?". Thinking cannot improve that, so
+#                it is OFF in BOTH modes. This is the cheapest 3 seconds in the
+#                system to recover.
+#   specialists  13s/question. Thinking helps them choose search terms and
+#                interpret passages, but only materially on hard multi-hop
+#                questions. OFF in normal mode, ON in deep research mode.
+#   analyst      7-14s/question. This is the compare-and-contrast that makes the
+#                output an analyst's view rather than a lookup. NEVER disabled,
+#                in either mode. Speed is bought from the other two hops only.
+#
+# The analyst also runs in a separate process behind A2A, where a per-request
+# toggle could not reach it anyway — the constraint and the intent agree.
+THINKING_ROUTER = int(_env("THINKING_ROUTER", "0"))
+THINKING_SPECIALIST_NORMAL = int(_env("THINKING_SPECIALIST_NORMAL", "0"))
+THINKING_SPECIALIST_DEEP = int(_env("THINKING_SPECIALIST_DEEP", "-1"))
+THINKING_ANALYST = int(_env("THINKING_ANALYST", "-1"))
+
+
+def thinking_config(budget: int):
+    """A GenerateContentConfig carrying a thinking budget, or None to leave the
+    model default alone.
+
+    Returned as a fresh object each call: ADK deep-copies the agent's config into
+    every request, but sharing one mutable instance across agents is asking for
+    a surprise later.
+
+    NOTE: ADK forbids `tools`, `system_instruction` and `response_schema` inside
+    an agent's generate_content_config (it raises ValueError) — thinking_config
+    and sampling parameters are fine.
+    """
+    from google.genai import types  # local import keeps module import cheap
+
+    if budget is None:
+        return None
+    return types.GenerateContentConfig(
+        thinking_config=types.ThinkingConfig(thinking_budget=budget)
+    )
+
+
 # --- Uploaded-document lane -------------------------------------------------
 ENABLE_DOCUMENTS = _flag("ENABLE_DOCUMENTS", True)
 

@@ -16,7 +16,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 
 from coordinator import config as agent_config
-from coordinator.agent import build_root_agent
+from coordinator.agent import RESEARCH_MODES, build_root_agent
 from coordinator.document_store import store
 from coordinator.health import probe_datastore, probe_formatter
 from document_ai.ocr import OcrConfig
@@ -145,7 +145,7 @@ class AppState:
         self.capabilities = Capabilities(model=config.MODEL)
         self.sessions = SessionRegistry()
         self.ocr_config = OcrConfig.from_env()
-        self.runner: Runner | None = None
+        self.runners: dict[str, Runner] = {}
         self.session_service = InMemorySessionService()
         self._adk_sessions: set[str] = set()
         self._adk_lock = threading.Lock()
@@ -196,20 +196,30 @@ class AppState:
         else:
             caps.documents = True
 
-        root_agent = build_root_agent(
-            formatter=caps.formatter_mode,
-            enable_datastore=caps.datastore,
-            enable_documents=caps.documents,
-        )
-        self.runner = Runner(
-            app_name=config.APP_NAME,
-            agent=root_agent,
-            session_service=self.session_service,
-        )
+        # One graph per research mode. Thinking budgets are fixed when an agent
+        # is constructed, so a per-request toggle means building both up front
+        # rather than mutating a live agent, which would race across concurrent
+        # requests. Both runners share ONE session service and app_name, so the
+        # conversation stays continuous when the user flips the toggle mid-chat.
+        for mode in RESEARCH_MODES:
+            self.runners[mode] = Runner(
+                app_name=config.APP_NAME,
+                agent=build_root_agent(
+                    formatter=caps.formatter_mode,
+                    enable_datastore=caps.datastore,
+                    enable_documents=caps.documents,
+                    mode=mode,
+                ),
+                session_service=self.session_service,
+            )
+
+    def runner_for(self, mode: str) -> Runner:
+        """The runner for a research mode, falling back to normal."""
+        return self.runners.get(mode) or self.runners["normal"]
 
     async def close(self) -> None:
-        if self.runner:
-            await self.runner.close()
+        for runner in self.runners.values():
+            await runner.close()
 
     # -- ADK sessions -------------------------------------------------------
     async def ensure_adk_session(self, session_id: str) -> None:

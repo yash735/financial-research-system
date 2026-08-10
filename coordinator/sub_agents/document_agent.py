@@ -187,24 +187,50 @@ def read_document(
     }
 
 
-INSTRUCTION = (
+# How hard to look. This is the one genuine speed-versus-thoroughness trade in
+# the system, so it is exposed as the Deep research toggle rather than being
+# decided once for everyone.
+_SEARCH_NORMAL = (
+    "2. Use search_documents with precise financial terms rather than the "
+    "user's whole sentence. Put ALL the terms you need into one query — the "
+    "search ranks by term overlap, so 'total revenues operating income fiscal "
+    "2025' finds the statements page in a single call. Prefer one or two "
+    "well-chosen searches over many narrow ones.\n"
+    "3. Only search again if the first results genuinely lack what you need, "
+    "and when you do, change vocabulary rather than repeating yourself — a "
+    "filing may say 'operating income', 'operating profit', or 'income from "
+    "operations' for the same line.\n"
+)
+
+_SEARCH_DEEP = (
+    "2. Use search_documents with precise financial terms rather than the "
+    "user's whole sentence. Search AS MANY TIMES AS YOU NEED — thoroughness "
+    "matters more than speed here, and a missed figure is far worse than a slow "
+    "answer.\n"
+    "3. Actively try alternative vocabulary before concluding something is "
+    "absent: a filing may say 'operating income', 'operating profit', or "
+    "'income from operations' for the same line, and may report a figure in a "
+    "statements table, an MD&A discussion, and a segment note with different "
+    "wording each time. Search for the figure, then search again for the "
+    "surrounding discussion so you can explain it rather than just quote it.\n"
+    "3b. Cross-check anything that looks surprising against a second mention in "
+    "the document before reporting it.\n"
+)
+
+_INSTRUCTION_HEAD = (
     "You are a financial analyst working from documents the user uploaded in "
     "this conversation. They are typically annual reports, 10-K/10-Q filings, "
     "or investor presentations, converted to text by OCR.\n\n"
     "How to work:\n"
     "1. If you do not already know what is available, call "
     "list_uploaded_documents.\n"
-    "2. Use search_documents with precise financial terms rather than the "
-    "user's whole sentence. Put ALL the terms you need into one query — the "
-    "search ranks by term overlap, so 'total revenues operating income fiscal "
-    "2025' finds the statements page in a single call. Prefer one or two "
-    "well-chosen searches over many narrow ones; every extra round trip is "
-    "several seconds the user waits.\n"
-    "3. Only search again if the first results genuinely lack what you need, "
-    "and when you do, change vocabulary rather than repeating yourself — a "
-    "filing may say 'operating income', 'operating profit', or 'income from "
-    "operations' for the same line.\n"
+)
+
+_INSTRUCTION_TAIL = (
     "4. Use read_document only when you need a full section in order.\n\n"
+)
+
+_ANSWER_RULES = (
     "How to answer:\n"
     "- Report what the documents actually say, with the figures as printed. "
     "Include units and the period the figure covers.\n"
@@ -231,7 +257,19 @@ INSTRUCTION = (
 )
 
 
-def build_document_agent() -> Agent:
+def build_instruction(*, deep: bool = False) -> str:
+    return (
+        _INSTRUCTION_HEAD
+        + (_SEARCH_DEEP if deep else _SEARCH_NORMAL)
+        + _INSTRUCTION_TAIL
+        + _ANSWER_RULES
+    )
+
+
+def build_document_agent(*, deep: bool = False) -> Agent:
+    budget = (
+        config.THINKING_SPECIALIST_DEEP if deep else config.THINKING_SPECIALIST_NORMAL
+    )
     return Agent(
         name="document_agent",
         model=config.MODEL,
@@ -239,10 +277,11 @@ def build_document_agent() -> Agent:
             "Answers questions about financial documents the user uploaded in "
             "this session, which have been OCR'd and indexed for passage retrieval."
         ),
-        instruction=INSTRUCTION,
+        instruction=build_instruction(deep=deep),
         tools=[
             FunctionTool(list_uploaded_documents),
             FunctionTool(search_documents),
             FunctionTool(read_document),
         ],
+        generate_content_config=config.thinking_config(budget),
     )

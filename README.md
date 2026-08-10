@@ -152,6 +152,27 @@ Whatever is unavailable is shown greyed in the UI with the reason, not hidden.
 
 ---
 
+## Two research modes
+
+Reasoning costs latency on every hop, and it is not worth the same everywhere.
+
+| | router | specialists | analyst |
+|---|---|---|---|
+| **Normal** (default) | off | off, prefers 1–2 searches | **on** |
+| **Deep research** | off | **on**, searches exhaustively | **on** |
+
+The router performs a 3-way classification that reasoning cannot improve, so it
+never thinks — measured, that is 2.57s → 0.72s per question. The **analyst
+always reasons, in both modes**: its compare-and-contrast is what makes the
+output an analyst's view rather than a lookup, so speed is never bought from
+there.
+
+Thinking budgets are fixed when an agent is constructed, so the app builds one
+agent graph per mode at startup and routes each question to the matching runner.
+Both share one session, so the conversation continues across a mode switch.
+
+---
+
 ## Deployment
 
 | target | command | notes |

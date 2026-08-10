@@ -28,7 +28,10 @@ INSTRUCTION = (
 )
 
 
-def build_market_agent() -> Agent:
+def build_market_agent(*, deep: bool = False) -> Agent:
+    budget = (
+        config.THINKING_SPECIALIST_DEEP if deep else config.THINKING_SPECIALIST_NORMAL
+    )
     return Agent(
         name="market_agent",
         model=config.MODEL,
@@ -38,4 +41,5 @@ def build_market_agent() -> Agent:
         ),
         instruction=INSTRUCTION,
         tools=[google_search],
+        generate_content_config=config.thinking_config(budget),
     )

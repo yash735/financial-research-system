@@ -18,7 +18,7 @@
     trace: $('trace'), traceBody: $('trace-body'), traceTotal: $('trace-total'),
     gathered: $('gathered'), gatheredText: $('gathered-text'),
     shell: $('shell'), overlay: $('drop-overlay'), toasts: $('toasts'),
-    btnTheme: $('btn-theme'), btnTrace: $('btn-trace')
+    btnTheme: $('btn-theme'), btnTrace: $('btn-trace'), btnDeep: $('btn-deep')
   };
 
   var state = {
@@ -29,7 +29,8 @@
     abort: null,
     pollTimer: null,
     liveTimer: null,
-    turnStart: 0
+    turnStart: 0,
+    deep: false
   };
 
   var SUGGESTIONS = [
@@ -176,16 +177,31 @@
     var node = document.createElement('div');
     node.className = 'turn bot';
     node.innerHTML =
-      '<div class="who">Analyst <span class="thinking"><i></i><i></i><i></i></span></div>' +
+      '<div class="who">Analyst' +
+      (state.deep ? '<span class="mode-badge">deep research</span>' : '') +
+      ' <span class="thinking"><i></i><i></i><i></i></span></div>' +
+      '<div class="status"><span class="status-text">Routing…</span>' +
+      '<span class="status-ms"></span></div>' +
       '<div class="md"></div>';
     el.transcript.appendChild(node);
     scrollDown(true);
     return {
       root: node,
       body: node.querySelector('.md'),
-      thinking: node.querySelector('.thinking')
+      thinking: node.querySelector('.thinking'),
+      status: node.querySelector('.status'),
+      statusText: node.querySelector('.status-text'),
+      statusMs: node.querySelector('.status-ms')
     };
   }
+
+  var STATUS = {
+    gatherer: 'Deciding which sources to use…',
+    document_agent: 'Searching your uploaded documents…',
+    financials_agent: 'Searching the indexed filings…',
+    market_agent: 'Checking live market data…',
+    formatter_agent: 'Writing the analysis…'
+  };
 
   /* ── trace ─────────────────────────────────────────────────────────── */
   function resetTrace() {
@@ -258,6 +274,8 @@
       el.traceTotal.textContent = fmtMs(ms);
       var pending = el.traceBody.querySelectorAll('.call.pending .call-ms');
       for (var i = 0; i < pending.length; i++) pending[i].textContent = fmtMs(ms);
+      var live = document.querySelectorAll('.turn.bot .status-ms');
+      for (var j = 0; j < live.length; j++) live[j].textContent = fmtMs(ms);
     }, 100);
   }
 
@@ -292,7 +310,7 @@
     fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: state.sessionId, message: text }),
+      body: JSON.stringify({ session_id: state.sessionId, message: text, mode: state.deep ? 'deep' : 'normal' }),
       signal: controller.signal
     }).then(function (res) {
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
@@ -331,12 +349,14 @@
         var d = ev.data || {};
         switch (ev.type) {
           case 'agent_start':
+            if (STATUS[ev.agent]) turn.statusText.textContent = STATUS[ev.agent];
             if (!nodes[ev.agent]) nodes[ev.agent] = traceNode(ev.label || ev.agent);
             Object.keys(nodes).forEach(function (k) {
               if (k !== ev.agent) nodes[k].classList.remove('live');
             });
             break;
           case 'tool_call': {
+            if (STATUS[d.tool]) turn.statusText.textContent = STATUS[d.tool];
             var node = nodes[ev.agent] || (nodes[ev.agent] = traceNode(ev.label || ev.agent));
             calls[d.tool + ':' + ev.seq] = traceCall(node, d);
             calls['_last:' + d.tool] = calls[d.tool + ':' + ev.seq];
@@ -349,12 +369,14 @@
           }
           case 'answer_delta':
             answer += d.text;
+            turn.status.style.display = 'none';
             turn.thinking.style.display = 'none';
             turn.body.innerHTML = md.render(answer);
             scrollDown();
             break;
           case 'answer_done':
             answer = d.text;
+            turn.status.style.display = 'none';
             turn.thinking.style.display = 'none';
             turn.body.innerHTML = md.render(answer);
             scrollDown();
@@ -381,6 +403,7 @@
 
       function finish() {
         clearInterval(state.liveTimer);
+        turn.status.style.display = 'none';
         Object.keys(nodes).forEach(function (k) { nodes[k].classList.remove('live'); });
         turn.thinking.style.display = 'none';
         if (!turn.body.innerHTML) {
@@ -428,6 +451,17 @@
       var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem('frs-theme', next);
+    });
+
+    // deep research toggle. Deliberately NOT persisted: the app always opens in
+    // normal mode so a demo cannot start slow because of a setting left on.
+    el.btnDeep.addEventListener('click', function () {
+      state.deep = !state.deep;
+      el.btnDeep.classList.toggle('on', state.deep);
+      el.btnDeep.setAttribute('aria-pressed', String(state.deep));
+      el.input.placeholder = state.deep
+        ? 'Deep research — slower, searches exhaustively…'
+        : 'Ask a question about the filing…';
     });
 
     // trace toggle

@@ -55,6 +55,13 @@ root_agent = Agent(
     ),
     instruction=FORMATTER_INSTRUCTION,
     # No tools. Pure analysis/formatting over the input text.
+    #
+    # The analyst ALWAYS thinks. The web app's Deep research toggle deliberately
+    # does not reach this agent: reasoning here is the compare-and-contrast the
+    # product exists to produce, so it is never traded for speed. (It could not
+    # reach it anyway — this runs in its own process, and thinking budgets are
+    # fixed at construction time.)
+    generate_content_config=config.thinking_config(config.THINKING_ANALYST),
 )
 
 # ---------------------------------------------------------------------------

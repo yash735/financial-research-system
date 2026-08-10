@@ -42,12 +42,15 @@ INSTRUCTION = (
 )
 
 
-def build_financials_agent() -> Agent:
+def build_financials_agent(*, deep: bool = False) -> Agent:
     """Construct the specialist. Requires a configured datastore."""
     if not config.DATASTORE_PATH:
         raise ValueError(
             "VERTEX_SEARCH_DATASTORE is not configured — cannot build financials_agent."
         )
+    budget = (
+        config.THINKING_SPECIALIST_DEEP if deep else config.THINKING_SPECIALIST_NORMAL
+    )
     return Agent(
         name="financials_agent",
         model=config.MODEL,
@@ -57,4 +60,5 @@ def build_financials_agent() -> Agent:
         ),
         instruction=INSTRUCTION,
         tools=[VertexAiSearchTool(data_store_id=config.DATASTORE_PATH)],
+        generate_content_config=config.thinking_config(budget),
     )

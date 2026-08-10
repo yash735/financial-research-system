@@ -34,4 +34,9 @@ def build_local_formatter() -> Agent:
             "Has no tools — it works purely on the text it is given."
         ),
         instruction=FALLBACK_FORMATTER_INSTRUCTION,
+        # The analyst thinks in BOTH research modes, deliberately. Its reasoning
+        # is the compare-and-contrast that makes the output an analyst's view
+        # rather than a lookup, so latency is never bought from here — only from
+        # the router (which cannot benefit) and the specialists.
+        generate_content_config=config.thinking_config(config.THINKING_ANALYST),
     )

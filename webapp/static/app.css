@@ -517,3 +517,41 @@ body.streaming .send-btn .icon-stop { display: block }
   color: var(--text-dim);
   font-size: 13.5px;
 }
+
+/* ── deep research toggle ──────────────────────────────────────────────── */
+/* Deliberately loud when active: on a screen share it must be obvious which
+   mode produced an answer, and turning it on is a moment worth narrating. */
+.deep-btn.on {
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), #7c5cf5);
+  border-color: transparent;
+}
+.deep-btn.on:hover { filter: brightness(1.07); }
+
+.mode-badge {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-size: 9.5px;
+  letter-spacing: .06em;
+  color: #fff;
+  background: linear-gradient(140deg, var(--accent), #7c5cf5);
+  vertical-align: 1px;
+}
+
+/* ── live status while the specialists work ────────────────────────────── */
+/* The trace panel already showed this, but during a ~19s specialist call the
+   viewer is looking at the answer area, not the right rail. */
+.turn.bot .status {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-dim);
+  padding: 2px 0 4px;
+}
+.turn.bot .status::before {
+  content: ""; width: 11px; height: 11px; flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+.status-ms { font: 11px var(--mono); color: var(--text-mute); }

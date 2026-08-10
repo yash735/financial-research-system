@@ -156,8 +156,13 @@ async def chat(request: Request) -> EventSourceResponse:
     message = (body.get("message") or "").strip()
     session = state.sessions.get_or_create(body.get("session_id"))
 
+    # "deep" makes the specialists think and search exhaustively. The analyst
+    # thinks in both modes — see coordinator/config.py.
+    mode = "deep" if body.get("mode") == "deep" else "normal"
+    runner = state.runner_for(mode)
+
     async def stream():
-        mapper = TraceMapper()
+        mapper = TraceMapper(mode=mode)
         yield {"data": json.dumps(mapper.start())}
 
         if not message:
@@ -178,7 +183,7 @@ async def chat(request: Request) -> EventSourceResponse:
             }
 
             async with Aclosing(
-                state.runner.run_async(
+                runner.run_async(
                     user_id=session.session_id,
                     session_id=session.session_id,
                     new_message=types.Content(

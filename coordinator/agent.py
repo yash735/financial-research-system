@@ -57,6 +57,8 @@ from .sub_agents import (
 FORMATTER_A2A_URL = config.FORMATTER_A2A_URL
 
 FormatterMode = Literal["remote", "local"]
+ResearchMode = Literal["normal", "deep"]
+RESEARCH_MODES: tuple[ResearchMode, ...] = ("normal", "deep")
 
 # The gatherer writes its labelled raw material here. Set unconditionally: it
 # costs nothing on the remote path, it is how the local fallback receives the
@@ -90,6 +92,7 @@ def build_root_agent(
     enable_datastore: bool | None = None,
     enable_documents: bool | None = None,
     enable_market: bool = True,
+    mode: ResearchMode = "normal",
 ) -> SequentialAgent:
     """Assemble the coordinator from the lanes that are actually available.
 
@@ -103,7 +106,21 @@ def build_root_agent(
       * Uploaded documents are PER-SESSION — they never change the graph.
         document_agent is always present when enabled; with no uploads its tools
         simply report an empty list.
+
+    `mode` selects how hard the specialists think and search:
+      * "normal" — specialists do not think, and are told to prefer one or two
+        well-chosen searches. ~13s.
+      * "deep"   — specialists think, and are told to search as many times as
+        they need. ~28s.
+
+    The ROUTER never thinks in either mode: it performs a 3-way classification
+    that reasoning cannot improve, and it costs 3.3s a question. The ANALYST
+    always thinks in either mode — that reasoning is the compare-and-contrast
+    the whole product is for, so speed is never bought from it. Thinking budgets
+    are set at construction time, which is why callers build one graph per mode
+    rather than toggling a live one.
     """
+    deep = mode == "deep"
     if enable_datastore is None:
         # Without an explicit decision we cannot probe here (no network I/O at
         # import time), so "auto" is optimistic: build the lane if it is
@@ -114,11 +131,11 @@ def build_root_agent(
 
     tools: list[AgentTool] = []
     if enable_documents:
-        tools.append(AgentTool(agent=build_document_agent()))
+        tools.append(AgentTool(agent=build_document_agent(deep=deep)))
     if enable_datastore and config.DATASTORE_PATH:
-        tools.append(AgentTool(agent=build_financials_agent()))
+        tools.append(AgentTool(agent=build_financials_agent(deep=deep)))
     if enable_market:
-        tools.append(AgentTool(agent=build_market_agent()))
+        tools.append(AgentTool(agent=build_market_agent(deep=deep)))
 
     gatherer = Agent(
         name="gatherer",
@@ -134,6 +151,10 @@ def build_root_agent(
         ),
         tools=tools,
         output_key=GATHERED_MATERIAL_KEY,
+        # Routing is a classification, not a reasoning problem. Thinking here
+        # costs ~3.3s per question and has not changed a routing decision in any
+        # measurement, so it stays off even in deep mode.
+        generate_content_config=config.thinking_config(config.THINKING_ROUTER),
     )
 
     analyst = (

@@ -95,4 +95,9 @@ ENABLE_DOCUMENTS = _flag("ENABLE_DOCUMENTS", True)
 MAX_DOCUMENT_READ_CHARS = int(_env("MAX_DOCUMENT_READ_CHARS", "24000"))
 
 # How many retrieved passages search_documents() returns by default.
-DEFAULT_SEARCH_TOP_K = int(_env("DEFAULT_SEARCH_TOP_K", "6"))
+#
+# Tuned up from 6: a dense 10-K page is ~4,000 characters, so a thin first pass
+# sends the agent round the search loop again, and each extra round is a full
+# LLM round-trip. Returning more passages up front is markedly cheaper in
+# wall-clock time than another search, even though the prompt is larger.
+DEFAULT_SEARCH_TOP_K = int(_env("DEFAULT_SEARCH_TOP_K", "10"))
